@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Local configuration
+local.properties
