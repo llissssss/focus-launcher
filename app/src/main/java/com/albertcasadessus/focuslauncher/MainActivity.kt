@@ -9,6 +9,7 @@ import android.app.role.RoleManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.provider.Settings
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +26,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -143,7 +147,7 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
                 roleManager.isRoleHeld(RoleManager.ROLE_HOME)
         }
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
             if (!isHomeRoleHeld && roleManager?.isRoleAvailable(RoleManager.ROLE_HOME) == true) {
                 Text(
                     text = "Set as Home",
@@ -156,18 +160,41 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Open settings",
-                modifier = Modifier
-                    .padding(4.dp)
-                    .clickable {
-                        val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(intent)
-                    }
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                IconButton(onClick = { openDialer(context) }, modifier = Modifier.padding(0.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Phone,
+                        contentDescription = "Open phone",
+                        modifier = Modifier
+                            .height(24.dp)
+                    )
+                }
+                IconButton(onClick = { openMaps(context) }, modifier = Modifier.padding(0.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Map,
+                        contentDescription = "Open maps",
+                        modifier = Modifier
+                            .height(24.dp)
+                    )
+                }
+                IconButton(onClick = { openSms(context) }, modifier = Modifier.padding(0.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Message,
+                        contentDescription = "Open messages",
+                        modifier = Modifier
+                            .height(24.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = { openSettings(context) }, modifier = Modifier.padding(2.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Open settings",
+                    modifier = Modifier
+                        .height(24.dp)
+                )
+            }
         }
 
         OutlinedTextField(
@@ -230,4 +257,40 @@ private fun launchApp(context: Context, packageName: String, activityName: Strin
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(intent)
+}
+
+private fun openDialer(context: Context) {
+    val intent = Intent(Intent.ACTION_DIAL).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    }
+}
+
+private fun openMaps(context: Context) {
+    val geoUri = Uri.parse("geo:0,0?q=")
+    val intent = Intent(Intent.ACTION_VIEW, geoUri).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    }
+}
+
+private fun openSms(context: Context) {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        data = Uri.parse("smsto:")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    }
+}
+
+private fun openSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    }
 }
