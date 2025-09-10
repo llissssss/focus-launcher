@@ -36,6 +36,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -51,12 +55,16 @@ import com.albertcasadessus.focuslauncher.ui.theme.FocusLauncherTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import android.app.usage.UsageStats
+import android.app.usage.UsageStatsManager
 
 data class LaunchableApp(
     val label: String,
     val packageName: String,
     val activityName: String
 )
+
+private enum class SortMode { ALPHABETICAL, RECENT }
 
 class MainActivity : ComponentActivity() {
     private val allAppsState = mutableStateOf(listOf<LaunchableApp>())
@@ -117,6 +125,7 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
     val context = LocalContext.current
     var query by remember { mutableStateOf(TextFieldValue("")) }
     val allApps = appsState
+    var sortMode by remember { mutableStateOf(SortMode.RECENT) }
 
     val filtered = remember(query, allApps.value) {
         val q = query.text.trim().lowercase()
@@ -215,10 +224,57 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
             }
         )
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val options = listOf("A–Z", "Recent")
+        SingleChoiceSegmentedButtonRow {
+            options.forEachIndexed { index, label ->
+                val selected = when (index) {
+                    0 -> sortMode == SortMode.ALPHABETICAL
+                    else -> sortMode == SortMode.RECENT
+                }
+                SegmentedButton(
+                    selected = selected,
+                    onClick = {
+                        sortMode = if (index == 0) SortMode.ALPHABETICAL else SortMode.RECENT
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+                ) {
+                    Text(label)
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
 
+        val hasUsageAccess = remember { hasUsageAccess(context) }
+        if (sortMode == SortMode.RECENT && !hasUsageAccess) {
+            Text(
+                text = "Grant usage access in Settings for smarter sorting",
+                modifier = Modifier
+                    .padding(vertical = 8.dp)
+                    .clickable {
+                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    },
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+
+        val usageMap = remember(hasUsageAccess, sortMode) { if (sortMode == SortMode.RECENT) getLastUsedMap(context) else emptyMap() }
+        val sorted = remember(filtered, usageMap, sortMode) {
+            when (sortMode) {
+                SortMode.ALPHABETICAL -> filtered.sortedBy { it.label.lowercase() }
+                SortMode.RECENT -> if (usageMap.isEmpty()) filtered.sortedBy { it.label.lowercase() } else filtered.sortedWith(
+                    compareByDescending<LaunchableApp> { usageMap[it.packageName] ?: 0L }.thenBy { it.label.lowercase() }
+                )
+            }
+        }
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filtered, key = { it.packageName + "/" + it.activityName }) { app ->
+            items(sorted, key = { it.packageName + "/" + it.activityName }) { app ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -257,6 +313,30 @@ private fun launchApp(context: Context, packageName: String, activityName: Strin
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(intent)
+}
+
+private fun hasUsageAccess(context: Context): Boolean {
+    return try {
+        val appOps = android.app.AppOpsManager.OPSTR_GET_USAGE_STATS
+        val appOpsManager = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+        val mode = appOpsManager.unsafeCheckOpNoThrow(appOps, android.os.Process.myUid(), context.packageName)
+        mode == android.app.AppOpsManager.MODE_ALLOWED
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun getLastUsedMap(context: Context): Map<String, Long> {
+    return try {
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val end = System.currentTimeMillis()
+        val start = end - 1000L * 60L * 60L * 24L * 30L // last 30 days
+        val stats: List<UsageStats> = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
+        stats.groupBy { it.packageName }
+            .mapValues { (_, list) -> list.maxOfOrNull { it.lastTimeUsed } ?: 0L }
+    } catch (_: Exception) {
+        emptyMap()
+    }
 }
 
 private fun openDialer(context: Context) {
