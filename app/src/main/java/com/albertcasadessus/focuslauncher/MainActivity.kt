@@ -2,6 +2,7 @@ package com.albertcasadessus.focuslauncher
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.app.role.RoleManager
@@ -23,14 +24,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +44,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.albertcasadessus.focuslauncher.ui.theme.FocusLauncherTheme
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 data class LaunchableApp(
     val label: String,
@@ -48,33 +55,73 @@ data class LaunchableApp(
 )
 
 class MainActivity : ComponentActivity() {
+    private val allAppsState = mutableStateOf(listOf<LaunchableApp>())
+    private var packageChangeReceiver: android.content.BroadcastReceiver? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             FocusLauncherTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    LauncherScreen(modifier = Modifier.padding(innerPadding))
+                    LauncherScreen(appsState = allAppsState, modifier = Modifier.padding(innerPadding))
                 }
             }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        // Initial load on background thread
+        if (allAppsState.value.isEmpty()) {
+            lifecycleScope.launch(Dispatchers.Default) {
+                val apps = loadLaunchableApps(packageManager)
+                launch(Dispatchers.Main) { allAppsState.value = apps }
+            }
+        }
+
+        if (packageChangeReceiver == null) {
+            packageChangeReceiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    lifecycleScope.launch(Dispatchers.Default) {
+                        val apps = loadLaunchableApps(packageManager)
+                        launch(Dispatchers.Main) { allAppsState.value = apps }
+                    }
+                }
+            }
+        }
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        registerReceiver(packageChangeReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(packageChangeReceiver)
+        } catch (_: Exception) { }
+    }
 }
 
 @Composable
-fun LauncherScreen(modifier: Modifier = Modifier) {
+fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var query by remember { mutableStateOf(TextFieldValue("")) }
-    var allApps by remember { mutableStateOf(listOf<LaunchableApp>()) }
+    val allApps = appsState
 
-    LaunchedEffect(Unit) {
-        allApps = loadLaunchableApps(context.packageManager)
-    }
-
-    val filtered = remember(query, allApps) {
+    val filtered = remember(query, allApps.value) {
         val q = query.text.trim().lowercase()
-        if (q.isEmpty()) allApps
-        else allApps.filter { it.label.lowercase().contains(q) }
+        if (q.isEmpty()) allApps.value
+        else allApps.value.filter { app ->
+            val labelLower = app.label.lowercase()
+            val packageLower = app.packageName.lowercase()
+            labelLower.contains(q) || packageLower.contains(q)
+        }
     }
 
     Column(
@@ -127,7 +174,18 @@ fun LauncherScreen(modifier: Modifier = Modifier) {
             value = query,
             onValueChange = { query = it },
             label = { Text("Search apps") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            trailingIcon = {
+                if (query.text.isNotEmpty()) {
+                    IconButton(onClick = { query = TextFieldValue("") }) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Clear search"
+                        )
+                    }
+                }
+            }
         )
 
         Spacer(modifier = Modifier.height(12.dp))
