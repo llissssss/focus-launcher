@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,8 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,9 +40,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -69,6 +71,7 @@ private enum class SortMode { ALPHABETICAL, RECENT }
 class MainActivity : ComponentActivity() {
     private val allAppsState = mutableStateOf(listOf<LaunchableApp>())
     private var packageChangeReceiver: android.content.BroadcastReceiver? = null
+    private val refreshTick = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,7 +79,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             FocusLauncherTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    LauncherScreen(appsState = allAppsState, modifier = Modifier.padding(innerPadding))
+                    LauncherScreen(appsState = allAppsState, refreshVersion = refreshTick.value, modifier = Modifier.padding(innerPadding))
                 }
             }
         }
@@ -118,10 +121,15 @@ class MainActivity : ComponentActivity() {
             unregisterReceiver(packageChangeReceiver)
         } catch (_: Exception) { }
     }
+
+    override fun onResume() {
+        super.onResume()
+        refreshTick.value = refreshTick.value + 1
+    }
 }
 
 @Composable
-fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modifier = Modifier) {
+fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, refreshVersion: Int = 0, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var query by remember { mutableStateOf(TextFieldValue("")) }
     val allApps = appsState
@@ -206,41 +214,47 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
             }
         }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text("Search apps") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            trailingIcon = {
-                if (query.text.isNotEmpty()) {
-                    IconButton(onClick = { query = TextFieldValue("") }) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "Clear search"
-                        )
+        var sortMenuExpanded by remember { mutableStateOf(false) }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search apps") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                trailingIcon = {
+                    if (query.text.isNotEmpty()) {
+                        IconButton(onClick = { query = TextFieldValue("") }) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Clear search"
+                            )
+                        }
                     }
                 }
-            }
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val options = listOf("A–Z", "Recent")
-        SingleChoiceSegmentedButtonRow {
-            options.forEachIndexed { index, label ->
-                val selected = when (index) {
-                    0 -> sortMode == SortMode.ALPHABETICAL
-                    else -> sortMode == SortMode.RECENT
+            )
+            Spacer(modifier = Modifier.padding(horizontal = 6.dp))
+            Box {
+                IconButton(onClick = { sortMenuExpanded = true }) {
+                    Icon(imageVector = Icons.Default.Sort, contentDescription = "Change sort")
                 }
-                SegmentedButton(
-                    selected = selected,
-                    onClick = {
-                        sortMode = if (index == 0) SortMode.ALPHABETICAL else SortMode.RECENT
-                    },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
-                ) {
-                    Text(label)
+                DropdownMenu(expanded = sortMenuExpanded, onDismissRequest = { sortMenuExpanded = false }) {
+                    val isAz = sortMode == SortMode.ALPHABETICAL
+                    DropdownMenuItem(
+                        text = { Text("A–Z") },
+                        onClick = { sortMode = SortMode.ALPHABETICAL; sortMenuExpanded = false },
+                        trailingIcon = if (isAz) {
+                            { Icon(imageVector = Icons.Filled.Check, contentDescription = null) }
+                        } else null
+                    )
+                    val isRecent = sortMode == SortMode.RECENT
+                    DropdownMenuItem(
+                        text = { Text("Recent") },
+                        onClick = { sortMode = SortMode.RECENT; sortMenuExpanded = false },
+                        trailingIcon = if (isRecent) {
+                            { Icon(imageVector = Icons.Filled.Check, contentDescription = null) }
+                        } else null
+                    )
                 }
             }
         }
@@ -263,8 +277,8 @@ fun LauncherScreen(appsState: MutableState<List<LaunchableApp>>, modifier: Modif
             )
         }
 
-        val usageMap = remember(hasUsageAccess, sortMode) { if (sortMode == SortMode.RECENT) getLastUsedMap(context) else emptyMap() }
-        val sorted = remember(filtered, usageMap, sortMode) {
+        val usageMap = remember(hasUsageAccess, sortMode, refreshVersion) { if (sortMode == SortMode.RECENT) getLastUsedMap(context) else emptyMap() }
+        val sorted = remember(filtered, usageMap, sortMode, refreshVersion) {
             when (sortMode) {
                 SortMode.ALPHABETICAL -> filtered.sortedBy { it.label.lowercase() }
                 SortMode.RECENT -> if (usageMap.isEmpty()) filtered.sortedBy { it.label.lowercase() } else filtered.sortedWith(
